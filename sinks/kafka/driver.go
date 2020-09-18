@@ -15,23 +15,29 @@
 package kafka
 
 import (
-	"encoding/json"
 	"net/url"
 	"sync"
 	"time"
-
 	"k8s.io/klog"
-
 	kafka_common "github.com/AliyunContainerService/kube-eventer/common/kafka"
 	event_core "github.com/AliyunContainerService/kube-eventer/core"
-	"github.com/AliyunContainerService/kube-eventer/metrics/core"
 	kube_api "k8s.io/api/core/v1"
 )
 
 type KafkaSinkPoint struct {
-	EventValue     interface{}
-	EventTimestamp time.Time
-	EventTags      map[string]string
+	EventKind            string
+	EventMessage         string
+	EventClusterName     string
+	EventName            string
+	EventNamespace       string
+	EventReason          string
+	EventSource          string
+	EventType            string
+	EventCount           int32
+	EventCreateTimestamp time.Time
+	EventFirstTimestamp  time.Time
+	EventLastTimestamp   time.Time
+	EventTimestamp       time.Time
 }
 
 type kafkaSink struct {
@@ -40,33 +46,24 @@ type kafkaSink struct {
 	ClusterName string
 }
 
-func getEventValue(event *kube_api.Event) (string, error) {
-	// TODO: check whether indenting is required.
-	bytes, err := json.MarshalIndent(event, "", " ")
-	if err != nil {
-		return "", err
-	}
-	return string(bytes), nil
-}
-
 func eventToPoint(event *kube_api.Event, clusterName string) (*KafkaSinkPoint, error) {
-	value, err := getEventValue(event)
-	if err != nil {
-		return nil, err
-	}
+
 	point := KafkaSinkPoint{
-		EventTimestamp: event.LastTimestamp.Time.UTC(),
-		EventValue:     value,
-		EventTags: map[string]string{
-			"eventID": string(event.UID),
-			"clusterName": clusterName,
-		},
+		EventKind:            event.InvolvedObject.Kind,
+		EventMessage:         event.Message,
+		EventName:            event.InvolvedObject.Name,
+		EventNamespace:       event.InvolvedObject.Namespace,
+		EventReason:          event.Reason,
+		EventSource:          event.Source.Component,
+		EventType:            event.Type,
+		EventCount:           event.Count,
+		EventCreateTimestamp: event.CreationTimestamp.Time.Local(),
+		EventFirstTimestamp:  event.FirstTimestamp.Time.Local(),
+		EventLastTimestamp:   event.LastTimestamp.Time.Local(),
+		EventTimestamp:       event.LastTimestamp.Time.Local(),
+		EventClusterName:     clusterName,
 	}
-	if event.InvolvedObject.Kind == "Pod" {
-		point.EventTags[core.LabelPodId.Key] = string(event.InvolvedObject.UID)
-		point.EventTags[core.LabelPodName.Key] = event.InvolvedObject.Name
-	}
-	point.EventTags[core.LabelHostname.Key] = event.Source.Host
+
 	return &point, nil
 }
 
