@@ -37,6 +37,7 @@ const (
 	brokerLeaderRetryWait  = 0
 	metricsTopic           = "heapster-metrics"
 	eventsTopic            = "heapster-events"
+	k8sClusterName         = "default"
 )
 
 const (
@@ -181,26 +182,26 @@ func getOptionsWithoutSecrets(values url.Values) string {
 	return options
 }
 
-func NewKafkaClient(uri *url.URL, topicType string) (KafkaClient, error) {
+func NewKafkaClient(uri *url.URL, topicType string) (KafkaClient, string, error) {
 	opts, err := url.ParseQuery(uri.RawQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse url's query string: %s", err)
+		return nil, "", fmt.Errorf("failed to parse url's query string: %s", err)
 	}
 	klog.V(3).Info(getOptionsWithoutSecrets(opts))
 
 	topic, err := getTopic(opts, topicType)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	compression, err := getCompression(opts)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var kafkaBrokers []string
 	if len(opts["brokers"]) < 1 {
-		return nil, fmt.Errorf("There is no broker assigned for connecting kafka")
+		return nil, "", fmt.Errorf("There is no broker assigned for connecting kafka")
 	}
 	kafkaBrokers = append(kafkaBrokers, opts["brokers"]...)
 	klog.V(2).Infof("initializing kafka sink with brokers - %v", kafkaBrokers)
@@ -223,24 +224,30 @@ func NewKafkaClient(uri *url.URL, topicType string) (KafkaClient, error) {
 
 	config.Net.TLS.Config, config.Net.TLS.Enable, err = getTlsConfiguration(opts)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	config.Net.SASL.User, config.Net.SASL.Password, config.Net.SASL.Enable, err = getSASLConfiguration(opts)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// set up producer of kafka server.
 	klog.V(3).Infof("attempting to setup kafka sink")
 	sinkProducer, err := kafka.NewSyncProducer(kafkaBrokers, config)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to setup Producer: - %v", err)
+		return nil, "", fmt.Errorf("Failed to setup Producer: - %v", err)
 	}
+
+	clusterName := k8sClusterName
+	if len(opts.Get("cluster_name")) > 0 {
+		clusterName = opts.Get("cluster_name")
+	}
+	klog.V(3).Infof("kafka sink setup k8s clusterName: %s", clusterName)
 
 	klog.V(3).Infof("kafka sink setup successfully")
 	return &kafkaSink{
 		producer:  sinkProducer,
 		dataTopic: topic,
-	}, nil
+	}, clusterName, nil
 }

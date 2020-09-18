@@ -37,6 +37,7 @@ type KafkaSinkPoint struct {
 type kafkaSink struct {
 	kafka_common.KafkaClient
 	sync.RWMutex
+	ClusterName string
 }
 
 func getEventValue(event *kube_api.Event) (string, error) {
@@ -48,7 +49,7 @@ func getEventValue(event *kube_api.Event) (string, error) {
 	return string(bytes), nil
 }
 
-func eventToPoint(event *kube_api.Event) (*KafkaSinkPoint, error) {
+func eventToPoint(event *kube_api.Event, clusterName string) (*KafkaSinkPoint, error) {
 	value, err := getEventValue(event)
 	if err != nil {
 		return nil, err
@@ -58,6 +59,7 @@ func eventToPoint(event *kube_api.Event) (*KafkaSinkPoint, error) {
 		EventValue:     value,
 		EventTags: map[string]string{
 			"eventID": string(event.UID),
+			"clusterName": clusterName,
 		},
 	}
 	if event.InvolvedObject.Kind == "Pod" {
@@ -73,7 +75,7 @@ func (sink *kafkaSink) ExportEvents(eventBatch *event_core.EventBatch) {
 	defer sink.Unlock()
 
 	for _, event := range eventBatch.Events {
-		point, err := eventToPoint(event)
+		point, err := eventToPoint(event, sink.ClusterName)
 		if err != nil {
 			klog.Warningf("Failed to convert event to point: %v", err)
 		}
@@ -86,12 +88,13 @@ func (sink *kafkaSink) ExportEvents(eventBatch *event_core.EventBatch) {
 }
 
 func NewKafkaSink(uri *url.URL) (event_core.EventSink, error) {
-	client, err := kafka_common.NewKafkaClient(uri, kafka_common.EventsTopic)
+	client, clusterName, err := kafka_common.NewKafkaClient(uri, kafka_common.EventsTopic)
 	if err != nil {
 		return nil, err
 	}
 
 	return &kafkaSink{
 		KafkaClient: client,
+		ClusterName: clusterName,
 	}, nil
 }
